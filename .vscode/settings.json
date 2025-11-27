@@ -4,5 +4,6 @@
     ],
     "rust-analyzer.server.extraEnv": {
         "PATH": "/var/home/${env:USER}/.cargo/bin:/app/bin:/usr/bin"
-    }
+    },
+    "rust-analyzer.cargo.buildScripts.enable": true
 }

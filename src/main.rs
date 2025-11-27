@@ -8,7 +8,7 @@ use crate::meta::TrackInfo;
 use adw::glib;
 use adw::prelude::*;
 use adw::{Application, WindowTitle};
-use gtk::{ApplicationWindow, Box, Button, HeaderBar, Orientation};
+use gtk::{gio, ApplicationWindow, Box, Button, HeaderBar, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -18,6 +18,7 @@ use std::time::Duration;
 const APP_ID: &str = "dev.noobping.listenmoe-radio";
 
 fn main() {
+    gio::resources_register_include!("compiled.gresource").expect("Failed to register resources");
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(build_ui);
     app.run();

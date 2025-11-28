@@ -18,7 +18,7 @@ use adw::gio::SimpleAction;
 use adw::glib;
 use adw::prelude::*;
 use adw::{Application, WindowTitle};
-use gtk::{gio, ApplicationWindow, Box, Button, HeaderBar, Orientation};
+use gtk::{gio, ApplicationWindow, Box, Button, HeaderBar, MenuButton, Orientation};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -46,14 +46,14 @@ fn build_ui(app: &Application) {
     let play_button = Button::from_icon_name("media-playback-start-symbolic");
     let stop_button = Button::from_icon_name("media-playback-pause-symbolic");
     stop_button.set_visible(false);
-
+    let play_action = gio::SimpleAction::new("play", None);
     {
         let radio = radio.clone();
         let data = meta.clone();
         let win = win_title.clone();
         let play = play_button.clone();
         let stop = stop_button.clone();
-        play_button.connect_clicked(move |_| {
+        play_action.connect_activate(move |_, _| {
             win.set_title("LISTEN.moe");
             win.set_subtitle("Connecting...");
             data.start();
@@ -62,14 +62,14 @@ fn build_ui(app: &Application) {
             stop.set_visible(true);
         });
     }
-
+    let stop_action = gio::SimpleAction::new("stop", None);
     {
         let radio = radio.clone();
         let data = meta.clone();
         let win = win_title.clone();
         let play = play_button.clone();
         let stop = stop_button.clone();
-        stop_button.connect_clicked(move |_| {
+        stop_action.connect_activate(move |_, _| {
             data.stop();
             radio.borrow_mut().stop();
             stop.set_visible(false);
@@ -78,6 +78,8 @@ fn build_ui(app: &Application) {
             win.set_subtitle("JPOP/KPOP Radio");
         });
     }
+    play_button.set_action_name(Some("win.play"));
+    stop_button.set_action_name(Some("win.stop"));
 
     // Headerbar with buttons
     let buttons = Box::new(Orientation::Horizontal, 0);
@@ -120,8 +122,39 @@ fn build_ui(app: &Application) {
 
     #[cfg(feature = "setup")]
     window.add_action(&action);
+    window.add_action(&play_action);
+    window.add_action(&stop_action);
+
+    let toggle_action = gio::SimpleAction::new("play_or_stop", None);
+    {
+        let play = play_button.clone();
+        let stop = stop_button.clone();
+        let win_clone = window.clone();
+        toggle_action.connect_activate(move |_, _| {
+            if play.is_visible() {
+                let _ = adw::prelude::WidgetExt::activate_action(
+                    &win_clone,
+                    "win.play",
+                    None::<&glib::Variant>,
+                );
+            } else if stop.is_visible() {
+                let _ = adw::prelude::WidgetExt::activate_action(
+                    &win_clone,
+                    "win.stop",
+                    None::<&glib::Variant>,
+                );
+            }
+        });
+    }
+    window.add_action(&toggle_action);
+
     #[cfg(feature = "setup")]
     app.set_accels_for_action("win.setup", &["F1"]);
+    app.set_accels_for_action("win.play", &["XF86AudioPlay"]);
+    app.set_accels_for_action("win.stop", &["XF86AudioStop", "XF86AudioPause"]);
+    app.set_accels_for_action("win.jpop", &["XF86AudioPrev"]);
+    app.set_accels_for_action("win.kpop", &["XF86AudioNext"]);
+    app.set_accels_for_action("win.play_or_stop", &["space", "Return"]);
 
     // Poll the channel on the GTK main thread and update WindowTitle
     {

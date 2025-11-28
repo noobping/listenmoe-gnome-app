@@ -1,5 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -22,7 +23,7 @@ pub struct TrackInfo {
 }
 
 pub struct Meta {
-    station: Station,
+    station: Cell<Station>,
     sender: Sender<TrackInfo>,
     running: Arc<AtomicBool>,
 }
@@ -31,10 +32,24 @@ impl Meta {
     /// Create a new Meta, using the given channel to send track updates.
     pub fn new(station: Station, sender: Sender<TrackInfo>) -> Rc<Self> {
         Rc::new(Self {
-            station,
+            station: Cell::new(station),
             sender,
             running: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    pub fn set_station(self: &Rc<Self>, station: Station) {
+        let was_running = self
+            .running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err();
+        if was_running {
+            self.stop();
+        }
+        self.station.set(station);
+        if was_running {
+            self.start();
+        }
     }
 
     /// Start the background websocket/metadata loop.
@@ -50,7 +65,7 @@ impl Meta {
 
         let running = self.running.clone();
         let sender = self.sender.clone();
-        let station = self.station;
+        let station = self.station.get();
 
         thread::spawn(move || {
             let rt = Runtime::new().expect("Failed to create Tokio runtime for Meta");

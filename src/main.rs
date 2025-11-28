@@ -129,8 +129,8 @@ fn build_ui(app: &Application) {
         let play = play_button.clone();
         let stop = stop_button.clone();
         let win_clone = window.clone();
-        let toggle_action = gio::SimpleAction::new("toggle", None);
-        toggle_action.connect_activate(move |_, _| {
+        let action = gio::SimpleAction::new("toggle", None);
+        action.connect_activate(move |_, _| {
             if play.is_visible() {
                 let _ = adw::prelude::WidgetExt::activate_action(
                     &win_clone,
@@ -145,7 +145,29 @@ fn build_ui(app: &Application) {
                 );
             }
         });
-        window.add_action(&toggle_action);
+        window.add_action(&action);
+    }
+
+    {
+        let radio = radio.clone();
+        let data = meta.clone();
+        let action = gio::SimpleAction::new("jpop", None);
+        action.connect_activate(move |_, _| {
+            radio.borrow_mut().set_station(Station::Jpop);
+            data.set_station(Station::Jpop);
+        });
+        window.add_action(&action);
+    }
+
+    {
+        let radio = radio.clone();
+        let data = meta.clone();
+        let action = gio::SimpleAction::new("kpop", None);
+        action.connect_activate(move |_, _| {
+            radio.borrow_mut().set_station(Station::Kpop);
+            data.set_station(Station::Kpop);
+        });
+        window.add_action(&action);
     }
 
     #[cfg(feature = "setup")]

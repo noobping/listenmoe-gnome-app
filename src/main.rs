@@ -5,7 +5,7 @@ mod listen;
 mod meta;
 mod station;
 
-use crate::listen::ListenMoeRadio;
+use crate::listen::Listen;
 use crate::meta::Meta;
 use crate::meta::TrackInfo;
 use crate::station::Station;
@@ -19,8 +19,6 @@ use adw::glib;
 use adw::prelude::*;
 use adw::{Application, WindowTitle};
 use gtk::{gio, ApplicationWindow, Box, Button, HeaderBar, MenuButton, Orientation};
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
@@ -36,7 +34,7 @@ fn main() {
 
 fn build_ui(app: &Application) {
     let station = Station::Jpop;
-    let radio = Rc::new(RefCell::new(ListenMoeRadio::new(station)));
+    let radio = Listen::new(station);
 
     // Channel from Meta worker to main thread
     let (tx, rx) = mpsc::channel::<TrackInfo>();
@@ -57,7 +55,7 @@ fn build_ui(app: &Application) {
             win.set_title("LISTEN.moe");
             win.set_subtitle("Connecting...");
             data.start();
-            radio.borrow_mut().start();
+            radio.start();
             play.set_visible(false);
             stop.set_visible(true);
         });
@@ -71,7 +69,7 @@ fn build_ui(app: &Application) {
         let stop = stop_button.clone();
         stop_action.connect_activate(move |_, _| {
             data.stop();
-            radio.borrow_mut().stop();
+            radio.stop();
             stop.set_visible(false);
             play.set_visible(true);
             win.set_title("LISTEN.moe");
@@ -153,7 +151,7 @@ fn build_ui(app: &Application) {
         let data = meta.clone();
         let action = gio::SimpleAction::new("jpop", None);
         action.connect_activate(move |_, _| {
-            radio.borrow_mut().set_station(Station::Jpop);
+            radio.set_station(Station::Jpop);
             data.set_station(Station::Jpop);
         });
         window.add_action(&action);
@@ -164,7 +162,7 @@ fn build_ui(app: &Application) {
         let data = meta.clone();
         let action = gio::SimpleAction::new("kpop", None);
         action.connect_activate(move |_, _| {
-            radio.borrow_mut().set_station(Station::Kpop);
+            radio.set_station(Station::Kpop);
             data.set_station(Station::Kpop);
         });
         window.add_action(&action);

@@ -24,8 +24,8 @@ pub struct TrackInfo {
 
 pub struct Meta {
     station: Cell<Station>,
-    sender: Sender<TrackInfo>,
     running: Arc<AtomicBool>,
+    sender: Sender<TrackInfo>,
 }
 
 impl Meta {
@@ -33,16 +33,13 @@ impl Meta {
     pub fn new(station: Station, sender: Sender<TrackInfo>) -> Rc<Self> {
         Rc::new(Self {
             station: Cell::new(station),
-            sender,
             running: Arc::new(AtomicBool::new(false)),
+            sender,
         })
     }
 
     pub fn set_station(self: &Rc<Self>, station: Station) {
-        let was_running = self
-            .running
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err();
+        let was_running = self.running.load(Ordering::SeqCst);
         if was_running {
             self.stop();
         }
@@ -71,7 +68,7 @@ impl Meta {
             let rt = Runtime::new().expect("Failed to create Tokio runtime for Meta");
 
             if let Err(err) = rt.block_on(run_meta_loop(station, sender, running.clone())) {
-                eprintln!("[meta] Fatal error in metadata loop: {err}");
+                eprintln!("Gateway error in metadata loop: {err}");
             }
         });
     }
@@ -99,7 +96,7 @@ async fn run_meta_loop(
                 if !running.load(Ordering::SeqCst) {
                     break;
                 }
-                eprintln!("[meta] connection error: {err}, retrying in 5s…");
+                eprintln!("Gateway connection error: {err}, retrying in 5s…");
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }
@@ -120,7 +117,7 @@ async fn run_once(
 
     let url = station.ws_url();
     let (ws_stream, _) = connect_async(url).await?;
-    println!("[meta] Connected to LISTEN.moe gateway");
+    println!("Gateway connected to LISTEN.moe");
 
     let (mut write, mut read) = ws_stream.split();
 
@@ -157,7 +154,7 @@ async fn run_once(
                 }
 
                 if let Err(err) = write.send(Message::Text(r#"{"op":9}"#.into())).await {
-                    eprintln!("[meta] heartbeat send error: {err}");
+                    eprintln!("Gateway heartbeat send error: {err}");
                     break;
                 }
             }
@@ -179,7 +176,7 @@ async fn run_once(
         let json: Value = match serde_json::from_str(&txt) {
             Ok(v) => v,
             Err(err) => {
-                eprintln!("[meta] JSON parse error: {err}");
+                eprintln!("Gateway JSON parse error: {err}");
                 continue;
             }
         };
@@ -188,7 +185,7 @@ async fn run_once(
         let t = json["t"].as_str().unwrap_or("");
 
         if op == 10 {
-            println!("[meta] Heartbeat ACK");
+            println!("Gateway heartbeat ACK");
             continue;
         }
 

@@ -168,7 +168,7 @@ async fn run_meta_loop(
     Ok(())
 }
 
-/// Single websocket session.
+/// Single websocket session, with inline heartbeat via `tokio::select!`.
 async fn run_once(
     station: Station,
     sender: Sender<TrackInfo>,
@@ -184,28 +184,23 @@ async fn run_once(
 
     let (mut write, mut read) = ws_stream.split();
 
-    // === 1. Read hello (op=0) and get heartbeat interval ===
+    // Read hello and get heartbeat interval (if any)
     let heartbeat_ms = read_hello_heartbeat(&mut read).await?;
+    let heartbeat_dur = heartbeat_ms.map(Duration::from_millis);
 
-    // === 2. Spawn heartbeat task (if we got an interval) ===
-    if let Some(ms) = heartbeat_ms {
-        let stop_for_hb = stop.clone();
-        let mut write = write.reunite(read.into_inner()).expect("failed to reunite");
-        // Re-split after spawning heartbeat:
-        let (mut w, r) = write.split();
-        write = w;
-        read = r;
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
 
-        tokio::spawn(async move {
-            let interval = Duration::from_millis(ms);
-            loop {
-                if stop_for_hb.load(Ordering::SeqCst) {
-                    break;
+        tokio::select! {
+            // Heartbeat branch – only compiled if we actually got an interval
+            _ = async {
+                if let Some(d) = heartbeat_dur {
+                    sleep(d).await;
                 }
-
-                sleep(interval).await;
-
-                if stop_for_hb.load(Ordering::SeqCst) {
+            }, if heartbeat_dur.is_some() => {
+                if stop.load(Ordering::SeqCst) {
                     break;
                 }
 
@@ -214,41 +209,41 @@ async fn run_once(
                     break;
                 }
             }
-        });
-    }
 
-    // === 3. Process all subsequent messages ===
-    while !stop.load(Ordering::SeqCst) {
-        let Some(msg) = read.next().await else {
-            break;
-        };
+            // Incoming messages branch
+            maybe_msg = read.next() => {
+                let Some(msg) = maybe_msg else {
+                    // Stream ended
+                    break;
+                };
 
-        let msg = msg?;
-        if !msg.is_text() {
-            continue;
-        }
-
-        let txt = msg.into_text()?;
-        let env: GatewayEnvelope = match serde_json::from_str(&txt) {
-            Ok(env) => env,
-            Err(err) => {
-                eprintln!("Gateway JSON parse error: {err}");
-                continue;
-            }
-        };
-
-        match (env.op, env.t.as_deref()) {
-            (OP_HEARTBEAT_ACK, _) => {
-                // Could be used for metrics / debugging
-                println!("Gateway heartbeat ACK");
-            }
-            (OP_DISPATCH, Some(EVENT_TRACK_UPDATE)) => {
-                if let Some(info) = parse_track_info(&env.d) {
-                    let _ = sender.send(info);
+                let msg = msg?;
+                if !msg.is_text() {
+                    continue;
                 }
-            }
-            _ => {
-                // Ignore everything else for now
+
+                let txt = msg.into_text()?;
+                let env: GatewayEnvelope = match serde_json::from_str(&txt) {
+                    Ok(env) => env,
+                    Err(err) => {
+                        eprintln!("Gateway JSON parse error: {err}");
+                        continue;
+                    }
+                };
+
+                match (env.op, env.t.as_deref()) {
+                    (OP_HEARTBEAT_ACK, _) => {
+                        println!("Gateway heartbeat ACK");
+                    }
+                    (OP_DISPATCH, Some(EVENT_TRACK_UPDATE)) => {
+                        if let Some(info) = parse_track_info(&env.d) {
+                            let _ = sender.send(info);
+                        }
+                    }
+                    _ => {
+                        // ignore other ops/events for now
+                    }
+                }
             }
         }
     }
@@ -257,10 +252,9 @@ async fn run_once(
 }
 
 /// Read the initial hello and extract the heartbeat interval (if any).
-async fn read_hello_heartbeat<S>(read: &mut S) -> MetaResult<Option<u64>>
-where
-    S: StreamExt<Item = tokio_tungstenite::tungstenite::Result<Message>> + Unpin,
-{
+async fn read_hello_heartbeat(
+    read: &mut (impl StreamExt<Item = tokio_tungstenite::tungstenite::Result<Message>> + Unpin),
+) -> MetaResult<Option<u64>> {
     if let Some(msg) = read.next().await {
         let msg = msg?;
         if msg.is_text() {

@@ -7,7 +7,7 @@ mod listen;
 mod meta;
 mod station;
 
-use crate::config::APP_ID;
+use crate::config::{APP_ID, RESOURCE_ID};
 use crate::listen::Listen;
 use crate::meta::Meta;
 use crate::meta::TrackInfo;
@@ -20,9 +20,10 @@ use adw::glib;
 use adw::prelude::*;
 use adw::{Application, WindowTitle};
 use gtk::{
-    gdk::{gdk_pixbuf, Display, Texture}, GestureClick,
+    gdk::{gdk_pixbuf, Display, Texture},
     gio::{resources_register_include, Cancellable, File, Menu, SimpleAction},
-    ApplicationWindow, Box, Button, HeaderBar, MenuButton, Orientation, Picture, Popover,
+    ApplicationWindow, Box, Button, GestureClick, HeaderBar, MenuButton, Orientation, Picture,
+    Popover, IconTheme,
 };
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError;
@@ -30,6 +31,10 @@ use std::time::Duration;
 
 fn main() {
     resources_register_include!("compiled.gresource").expect("Failed to register resources");
+    adw::init().expect("Failed to initialize libadwaita");
+    let display = Display::default().expect("No display available");
+    let theme = IconTheme::for_display(&display);
+    theme.add_resource_path(RESOURCE_ID);
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(build_ui);
     app.run();
@@ -84,10 +89,10 @@ fn build_ui(app: &Application) {
 
     // menu
     let menu = Menu::new();
-    // menu.append(Some("About"), Some("app.about"));
     menu.append(Some("Copy title & artist"), Some("win.copy"));
     menu.append(Some("Play J-pop"), Some("win.jpop"));
     menu.append(Some("Play K-pop"), Some("win.kpop"));
+    menu.append(Some("About"), Some("win.about"));
     menu.append(Some("Quite"), Some("win.quite"));
     let more_button = MenuButton::builder()
         .icon_name("view-more-symbolic")
@@ -151,6 +156,23 @@ fn build_ui(app: &Application) {
 
     window.set_titlebar(Some(&header));
     window.set_child(Some(&dummy));
+
+    let about_action = SimpleAction::new("about", None);
+    {
+        let win_clone = window.clone();
+        about_action.connect_activate(move |_, _| {
+            let authors: Vec<_> = env!("CARGO_PKG_AUTHORS").split(':').collect();
+            let about = adw::AboutDialog::builder()
+                .application_name(env!("CARGO_PKG_NAME"))
+                .application_icon(APP_ID)
+                .version(env!("CARGO_PKG_VERSION"))
+                .developers(&authors[..])
+                .comments(option_env!("CARGO_PKG_DESCRIPTION").unwrap_or(""))
+                .build();
+            about.present(Some(&win_clone));
+        });
+    }
+    window.add_action(&about_action);
 
     #[cfg(feature = "setup")]
     let action = SimpleAction::new("setup", None);
@@ -264,7 +286,8 @@ fn build_ui(app: &Application) {
     }
 
     #[cfg(feature = "setup")]
-    app.set_accels_for_action("win.setup", &["F1"]);
+    app.set_accels_for_action("win.setup", &["F2"]);
+    app.set_accels_for_action("win.about", &["F1"]);
     app.set_accels_for_action("win.copy", &["<primary>c"]);
     app.set_accels_for_action("win.quite", &["<primary>q", "Escape"]);
     app.set_accels_for_action("win.play", &["XF86AudioPlay"]);

@@ -1,6 +1,7 @@
 [package]
 name = "listenmoe"
 description = "Anime/Japanese Radio powered by LISTEN.moe!"
+authors = ["noobping"]
 version = "0.1.1"
 edition = "2021"
 

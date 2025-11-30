@@ -15,11 +15,16 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::station::Station;
 
+const ALBUM_COVER_BASE: &str = "https://cdn.listen.moe/covers/";
+const ARTIST_IMAGE_BASE: &str = "https://cdn.listen.moe/artists/";
+
 /// Track info sent to the UI thread.
 #[derive(Debug, Clone)]
 pub struct TrackInfo {
     pub artist: String,
     pub title: String,
+    pub album_cover: Option<String>,
+    pub artist_image: Option<String>,
 }
 
 pub struct Meta {
@@ -230,5 +235,26 @@ fn parse_track_info(json: &Value) -> Option<TrackInfo> {
         artists.join(", ")
     };
 
-    Some(TrackInfo { artist, title })
+    let album_cover = song
+        .get("albums")
+        .and_then(|a| a.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|album| album.get("image"))
+        .and_then(|img| img.as_str())
+        .map(|name| format!("{ALBUM_COVER_BASE}{name}"));
+
+    let artist_image = song
+        .get("artists")
+        .and_then(|a| a.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|artist| artist.get("image"))
+        .and_then(|img| img.as_str())
+        .map(|name| format!("{ARTIST_IMAGE_BASE}{name}"));
+
+    Some(TrackInfo {
+        artist,
+        title,
+        album_cover,
+        artist_image,
+    })
 }

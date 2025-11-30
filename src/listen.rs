@@ -4,10 +4,7 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::rc::Rc;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::mpsc;
 use std::thread;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
@@ -19,7 +16,7 @@ use symphonia::core::probe::Hint;
 
 use crate::station::Station;
 
-type DynError = Box<dyn Error + Send + Sync>;
+type DynError = Box<dyn Error + Send + Sync + 'static>;
 type Result<T> = std::result::Result<T, DynError>;
 
 #[derive(Debug)]
@@ -55,10 +52,20 @@ impl MediaSource for HttpSource {
 }
 
 #[derive(Debug)]
+enum Control {
+    Stop,
+}
+
+#[derive(Debug)]
+enum State {
+    Stopped,
+    Playing { tx: mpsc::Sender<Control> },
+}
+
+#[derive(Debug)]
 struct Inner {
     station: Station,
-    running: bool,
-    stop_flag: Option<Arc<AtomicBool>>,
+    state: State,
 }
 
 #[derive(Debug)]
@@ -71,8 +78,7 @@ impl Listen {
         Rc::new(Self {
             inner: RefCell::new(Inner {
                 station,
-                running: false,
-                stop_flag: None,
+                state: State::Stopped,
             }),
         })
     }
@@ -80,23 +86,20 @@ impl Listen {
     pub fn set_station(&self, station: Station) {
         let mut inner = self.inner.borrow_mut();
 
-        let was_running = inner.running;
-        if was_running {
+        let was_playing = matches!(inner.state, State::Playing { .. });
+        if was_playing {
             Self::stop_inner(&mut inner);
         }
 
         inner.station = station;
 
-        if was_running {
+        if was_playing {
             Self::start_inner(&mut inner);
         }
     }
 
     pub fn start(&self) {
         let mut inner = self.inner.borrow_mut();
-        if inner.running {
-            return;
-        }
         Self::start_inner(&mut inner);
     }
 
@@ -106,46 +109,45 @@ impl Listen {
     }
 
     fn start_inner(inner: &mut Inner) {
-        if inner.running {
-            return;
-        }
-
-        inner.running = true;
-
-        let stop = Arc::new(AtomicBool::new(false));
-        inner.stop_flag = Some(Arc::clone(&stop));
-
-        let station = inner.station;
-
-        thread::spawn(move || {
-            if let Err(err) = run_listenmoe_stream(station, stop) {
-                eprintln!("stream error: {err}");
+        match inner.state {
+            State::Playing { .. } => {
+                // already playing
+                return;
             }
-        });
+            State::Stopped => {
+                let (tx, rx) = mpsc::channel::<Control>();
+                let station = inner.station;
+
+                inner.state = State::Playing { tx: tx.clone() };
+
+                // detached worker thread; will exit on Stop or error
+                thread::spawn(move || {
+                    if let Err(err) = run_listenmoe_stream(station, rx) {
+                        eprintln!("stream error: {err}");
+                    }
+                });
+            }
+        }
     }
 
     fn stop_inner(inner: &mut Inner) {
-        if !inner.running {
-            return;
+        if let State::Playing { tx } = &inner.state {
+            // Ignore send errors (thread might already be gone)
+            let _ = tx.send(Control::Stop);
         }
-
-        inner.running = false;
-
-        if let Some(stop) = inner.stop_flag.take() {
-            stop.store(true, Ordering::SeqCst);
-        }
+        inner.state = State::Stopped;
     }
 }
 
 impl Drop for Listen {
     fn drop(&mut self) {
-        // Best-effort cleanup if user "forgets" to stop.
+        // Best-effort cleanup
         let mut inner = self.inner.borrow_mut();
         Self::stop_inner(&mut inner);
     }
 }
 
-fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<()> {
+fn run_listenmoe_stream(station: Station, rx: mpsc::Receiver<Control>) -> Result<()> {
     let url = station.stream_url();
     println!("Connecting to {url}…");
 
@@ -193,7 +195,18 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<()> {
     let mut channels: u16 = 0;
     let mut sample_rate: u32 = 0;
 
-    while !stop.load(Ordering::Relaxed) {
+    loop {
+        // Check for control messages first
+        match rx.try_recv() {
+            Ok(Control::Stop) | Err(mpsc::TryRecvError::Disconnected) => {
+                println!("Stop requested, shutting down stream.");
+                break;
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                // no command, continue
+            }
+        }
+
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(SymphoniaError::ResetRequired) => {

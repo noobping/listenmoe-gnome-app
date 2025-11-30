@@ -1,6 +1,6 @@
 use reqwest::blocking::{Client, Response};
 use rodio::{buffer::SamplesBuffer, OutputStreamBuilder, Sink};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::error::Error;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::rc::Rc;
@@ -20,6 +20,7 @@ use symphonia::core::probe::Hint;
 use crate::station::Station;
 
 type DynError = Box<dyn Error + Send + Sync>;
+type Result<T> = std::result::Result<T, DynError>;
 
 #[derive(Debug)]
 struct HttpSource {
@@ -54,42 +55,68 @@ impl MediaSource for HttpSource {
 }
 
 #[derive(Debug)]
+struct Inner {
+    station: Station,
+    running: bool,
+    stop_flag: Option<Arc<AtomicBool>>,
+}
+
+#[derive(Debug)]
 pub struct Listen {
-    station: Cell<Station>,
-    running: Cell<bool>,
-    stop_flag: RefCell<Option<Arc<AtomicBool>>>,
+    inner: RefCell<Inner>,
 }
 
 impl Listen {
     pub fn new(station: Station) -> Rc<Self> {
         Rc::new(Self {
-            station: Cell::new(station),
-            running: Cell::new(false),
-            stop_flag: RefCell::new(None),
+            inner: RefCell::new(Inner {
+                station,
+                running: false,
+                stop_flag: None,
+            }),
         })
     }
 
     pub fn set_station(&self, station: Station) {
-        let was_running = self.running.get();
+        let mut inner = self.inner.borrow_mut();
+
+        let was_running = inner.running;
         if was_running {
-            self.stop();
+            Self::stop_inner(&mut inner);
         }
-        self.station.set(station);
+
+        inner.station = station;
+
         if was_running {
-            self.start();
+            Self::start_inner(&mut inner);
         }
     }
 
     pub fn start(&self) {
-        if self.running.get() {
+        let mut inner = self.inner.borrow_mut();
+        if inner.running {
             return;
         }
-        self.running.set(true);
+        Self::start_inner(&mut inner);
+    }
+
+    pub fn stop(&self) {
+        let mut inner = self.inner.borrow_mut();
+        Self::stop_inner(&mut inner);
+    }
+
+    fn start_inner(inner: &mut Inner) {
+        if inner.running {
+            return;
+        }
+
+        inner.running = true;
 
         let stop = Arc::new(AtomicBool::new(false));
-        *self.stop_flag.borrow_mut() = Some(Arc::clone(&stop));
+        inner.stop_flag = Some(Arc::clone(&stop));
 
-        let station = self.station.get();
+        let station = inner.station;
+
         thread::spawn(move || {
             if let Err(err) = run_listenmoe_stream(station, stop) {
                 eprintln!("stream error: {err}");
@@ -97,27 +124,28 @@ impl Listen {
         });
     }
 
-    pub fn stop(&self) {
-        self.running.set(false);
-        if let Some(stop) = self.stop_flag.borrow_mut().take() {
-            stop.store(true, Ordering::Relaxed);
+    fn stop_inner(inner: &mut Inner) {
+        if !inner.running {
+            return;
+        }
+
+        inner.running = false;
+
+        if let Some(stop) = inner.stop_flag.take() {
+            stop.store(true, Ordering::SeqCst);
         }
     }
 }
 
 impl Drop for Listen {
     fn drop(&mut self) {
-        // Best-effort cleanup if user forgot to call stop()
-        if self.running.get() {
-            self.running.set(false);
-            if let Some(stop) = self.stop_flag.borrow_mut().take() {
-                stop.store(true, Ordering::Relaxed);
-            }
-        }
+        // Best-effort cleanup if user "forgets" to stop.
+        let mut inner = self.inner.borrow_mut();
+        Self::stop_inner(&mut inner);
     }
 }
 
-fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), DynError> {
+fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<()> {
     let url = station.stream_url();
     println!("Connecting to {url}…");
 
@@ -231,7 +259,7 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), D
         let buf = sample_buf.as_mut().expect("sample_buf just initialized");
         buf.copy_interleaved_ref(decoded);
 
-        let samples: Vec<f32> = buf.samples().to_owned();
+        let samples = buf.samples().to_owned();
         let source = SamplesBuffer::new(channels, sample_rate, samples);
         sink.append(source);
     }

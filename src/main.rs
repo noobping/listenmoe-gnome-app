@@ -20,7 +20,7 @@ use adw::glib;
 use adw::prelude::*;
 use adw::{Application, WindowTitle};
 use gtk::{
-    gdk::{gdk_pixbuf, Display, Texture},
+    gdk::{gdk_pixbuf, Display, Texture}, GestureClick,
     gio::{resources_register_include, Cancellable, File, Menu, SimpleAction},
     ApplicationWindow, Box, Button, HeaderBar, MenuButton, Orientation, Picture, Popover,
 };
@@ -114,6 +114,15 @@ fn build_ui(app: &Application) {
         .child(&art_picture)
         .build();
     art_popover.set_parent(&header);
+
+    let click = GestureClick::new();
+    {
+        let art = art_popover.clone();
+        click.connect_released(move |_, _, _, _| {
+            art.popdown();
+        });
+    }
+    art_picture.add_controller(click);
 
     // Tiny dummy content so GTK can shrink the window
     let dummy = Box::new(Orientation::Vertical, 0);

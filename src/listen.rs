@@ -56,6 +56,15 @@ enum Control {
     Stop,
 }
 
+#[derive(Debug, Clone)]
+pub enum PlayerEvent {
+    Connecting { url: String },
+    HttpStatus(u16),
+    Started,
+    Stopped,
+    Error(String),
+}
+
 #[derive(Debug)]
 enum State {
     Stopped,
@@ -66,6 +75,7 @@ enum State {
 struct Inner {
     station: Station,
     state: State,
+    events_tx: mpsc::Sender<PlayerEvent>,
 }
 
 #[derive(Debug)]
@@ -74,13 +84,19 @@ pub struct Listen {
 }
 
 impl Listen {
-    pub fn new(station: Station) -> Rc<Self> {
-        Rc::new(Self {
+    /// Returns the player handle and a receiver for player events.
+    pub fn new(station: Station) -> (Rc<Self>, mpsc::Receiver<PlayerEvent>) {
+        let (events_tx, events_rx) = mpsc::channel::<PlayerEvent>();
+
+        let listen = Rc::new(Self {
             inner: RefCell::new(Inner {
                 station,
                 state: State::Stopped,
+                events_tx,
             }),
-        })
+        });
+
+        (listen, events_rx)
     }
 
     pub fn set_station(&self, station: Station) {
@@ -109,30 +125,25 @@ impl Listen {
     }
 
     fn start_inner(inner: &mut Inner) {
-        match inner.state {
-            State::Playing { .. } => {
-                // already playing
-                return;
-            }
-            State::Stopped => {
-                let (tx, rx) = mpsc::channel::<Control>();
-                let station = inner.station;
-
-                inner.state = State::Playing { tx: tx.clone() };
-
-                // detached worker thread; will exit on Stop or error
-                thread::spawn(move || {
-                    if let Err(err) = run_listenmoe_stream(station, rx) {
-                        eprintln!("stream error: {err}");
-                    }
-                });
-            }
+        if let State::Playing { .. } = inner.state {
+            return; // already playing
         }
+
+        let (tx, rx) = mpsc::channel::<Control>();
+        let station = inner.station;
+        let events_tx = inner.events_tx.clone();
+
+        inner.state = State::Playing { tx: tx.clone() };
+
+        thread::spawn(move || {
+            if let Err(err) = run_listenmoe_stream(station, rx, events_tx.clone()) {
+                let _ = events_tx.send(PlayerEvent::Error(format!("{err}")));
+            }
+        });
     }
 
     fn stop_inner(inner: &mut Inner) {
         if let State::Playing { tx } = &inner.state {
-            // Ignore send errors (thread might already be gone)
             let _ = tx.send(Control::Stop);
         }
         inner.state = State::Stopped;
@@ -141,23 +152,28 @@ impl Listen {
 
 impl Drop for Listen {
     fn drop(&mut self) {
-        // Best-effort cleanup
         let mut inner = self.inner.borrow_mut();
         Self::stop_inner(&mut inner);
     }
 }
 
-fn run_listenmoe_stream(station: Station, rx: mpsc::Receiver<Control>) -> Result<()> {
-    let url = station.stream_url();
-    println!("Connecting to {url}…");
+fn run_listenmoe_stream(
+    station: Station,
+    rx: mpsc::Receiver<Control>,
+    events_tx: mpsc::Sender<PlayerEvent>,
+) -> Result<()> {
+    let url = station.stream_url().to_string();
+    let _ = events_tx.send(PlayerEvent::Connecting { url: url.clone() });
 
     let client = Client::new();
     let response = client
-        .get(url)
+        .get(&url)
         .header("User-Agent", "listenmoe-rodio-symphonia/0.1")
         .send()?;
 
-    println!("HTTP status: {}", response.status());
+    let status_code = response.status().as_u16();
+    let _ = events_tx.send(PlayerEvent::HttpStatus(status_code));
+
     if !response.status().is_success() {
         return Err(format!("HTTP status {}", response.status()).into());
     }
@@ -189,28 +205,25 @@ fn run_listenmoe_stream(station: Station, rx: mpsc::Receiver<Control>) -> Result
     let stream = OutputStreamBuilder::open_default_stream()?;
     let sink = Sink::connect_new(&stream.mixer());
 
-    println!("Started decoding + playback.");
+    let _ = events_tx.send(PlayerEvent::Started);
 
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
     let mut channels: u16 = 0;
     let mut sample_rate: u32 = 0;
 
     loop {
-        // Check for control messages first
+        // Handle control messages
         match rx.try_recv() {
             Ok(Control::Stop) | Err(mpsc::TryRecvError::Disconnected) => {
-                println!("Stop requested, shutting down stream.");
+                let _ = events_tx.send(PlayerEvent::Stopped);
                 break;
             }
-            Err(mpsc::TryRecvError::Empty) => {
-                // no command, continue
-            }
+            Err(mpsc::TryRecvError::Empty) => {}
         }
 
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(SymphoniaError::ResetRequired) => {
-                eprintln!("Stream reset, reconfiguring decoder…");
                 let new_track = format
                     .tracks()
                     .iter()
@@ -239,7 +252,6 @@ fn run_listenmoe_stream(station: Station, rx: mpsc::Receiver<Control>) -> Result
             Ok(buf) => buf,
             Err(SymphoniaError::DecodeError(_)) => continue,
             Err(SymphoniaError::ResetRequired) => {
-                eprintln!("Decoder reset required, rebuilding decoder…");
                 let new_track = format
                     .tracks()
                     .iter()

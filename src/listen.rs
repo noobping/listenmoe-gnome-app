@@ -19,6 +19,8 @@ use symphonia::core::probe::Hint;
 
 use crate::station::Station;
 
+type DynError = Box<dyn Error + Send + Sync>;
+
 #[derive(Debug)]
 struct HttpSource {
     inner: Response,
@@ -67,7 +69,7 @@ impl Listen {
         })
     }
 
-    pub fn set_station(self: &Rc<Self>, station: Station) {
+    pub fn set_station(&self, station: Station) {
         let was_running = self.running.get();
         if was_running {
             self.stop();
@@ -78,30 +80,44 @@ impl Listen {
         }
     }
 
-    pub fn start(self: &Rc<Self>) {
+    pub fn start(&self) {
         if self.running.get() {
             return;
         }
         self.running.set(true);
 
         let stop = Arc::new(AtomicBool::new(false));
-        *self.stop_flag.borrow_mut() = Some(stop.clone());
+        *self.stop_flag.borrow_mut() = Some(Arc::clone(&stop));
 
         let station = self.station.get();
         thread::spawn(move || {
-            let _ = run_listenmoe_stream(station, stop);
+            if let Err(err) = run_listenmoe_stream(station, stop) {
+                eprintln!("stream error: {err}");
+            }
         });
     }
 
     pub fn stop(&self) {
         self.running.set(false);
         if let Some(stop) = self.stop_flag.borrow_mut().take() {
-            stop.store(true, Ordering::SeqCst);
+            stop.store(true, Ordering::Relaxed);
         }
     }
 }
 
-fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), Box<dyn Error>> {
+impl Drop for Listen {
+    fn drop(&mut self) {
+        // Best-effort cleanup if user forgot to call stop()
+        if self.running.get() {
+            self.running.set(false);
+            if let Some(stop) = self.stop_flag.borrow_mut().take() {
+                stop.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), DynError> {
     let url = station.stream_url();
     println!("Connecting to {url}…");
 
@@ -135,7 +151,7 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or("no supported audio tracks")?;
+        .ok_or_else(|| "no supported audio tracks".to_string())?;
 
     let mut track_id = track.id;
     let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
@@ -158,7 +174,7 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
                     .tracks()
                     .iter()
                     .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-                    .ok_or("no supported audio tracks after reset")?;
+                    .ok_or_else(|| "no supported audio tracks after reset".to_string())?;
 
                 track_id = new_track.id;
                 decoder = symphonia::default::get_codecs()
@@ -187,7 +203,7 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
                     .tracks()
                     .iter()
                     .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-                    .ok_or("no supported audio tracks after decoder reset")?;
+                    .ok_or_else(|| "no supported audio tracks after decoder reset".to_string())?;
 
                 track_id = new_track.id;
                 decoder = symphonia::default::get_codecs()
@@ -212,14 +228,14 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
             sample_buf = Some(SampleBuffer::<f32>::new(duration, spec));
         }
 
-        let buf = sample_buf.as_mut().unwrap();
+        let buf = sample_buf.as_mut().expect("sample_buf just initialized");
         buf.copy_interleaved_ref(decoded);
 
-        let samples: Vec<f32> = buf.samples().to_vec();
+        let samples: Vec<f32> = buf.samples().to_owned();
         let source = SamplesBuffer::new(channels, sample_rate, samples);
         sink.append(source);
     }
-    sink.stop();
 
+    sink.stop();
     Ok(())
 }

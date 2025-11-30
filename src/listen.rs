@@ -19,6 +19,7 @@ use symphonia::core::probe::Hint;
 
 use crate::station::Station;
 
+#[derive(Debug)]
 struct HttpSource {
     inner: Response,
 }
@@ -50,6 +51,7 @@ impl MediaSource for HttpSource {
     }
 }
 
+#[derive(Debug)]
 pub struct Listen {
     station: Cell<Station>,
     running: Cell<bool>,

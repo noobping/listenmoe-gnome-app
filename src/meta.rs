@@ -10,6 +10,7 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Runtime;
+use tokio::time::sleep;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -17,6 +18,9 @@ use crate::station::Station;
 
 const ALBUM_COVER_BASE: &str = "https://cdn.listen.moe/covers/";
 const ARTIST_IMAGE_BASE: &str = "https://cdn.listen.moe/artists/";
+
+type MetaError = Box<dyn std::error::Error + Send + Sync + 'static>;
+type MetaResult<T> = Result<T, MetaError>;
 
 /// Track info sent to the UI thread.
 #[derive(Debug, Clone)]
@@ -27,6 +31,7 @@ pub struct TrackInfo {
     pub artist_image: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct Meta {
     station: Cell<Station>,
     running: Cell<bool>,
@@ -45,21 +50,24 @@ impl Meta {
         })
     }
 
-    pub fn set_station(self: &Rc<Self>, station: Station) {
+    pub fn set_station(&self, station: Station) {
         let was_running = self.running.get();
         if was_running {
             self.stop();
         }
+
         self.station.set(station);
+
         if was_running {
             self.start();
         }
     }
 
-    pub fn start(self: &Rc<Self>) {
+    pub fn start(&self) {
         if self.running.get() {
             return;
         }
+
         self.running.set(true);
 
         let station = self.station.get();
@@ -69,7 +77,8 @@ impl Meta {
         *self.stop_flag.borrow_mut() = Some(stop.clone());
 
         thread::spawn(move || {
-            let rt = Runtime::new().expect("Failed to create Tokio runtime for Meta");
+            let rt =
+                Runtime::new().expect("Failed to create Tokio runtime for Meta metadata loop");
 
             if let Err(err) = rt.block_on(run_meta_loop(station, sender, stop)) {
                 eprintln!("Gateway error in metadata loop: {err}");
@@ -78,7 +87,8 @@ impl Meta {
     }
 
     pub fn stop(&self) {
-        self.running.set(false); // Mark as not running
+        // mark as not running
+        self.running.set(false);
 
         // Signal the background meta loop to stop
         if let Some(stop) = self.stop_flag.borrow_mut().take() {
@@ -92,21 +102,21 @@ async fn run_meta_loop(
     station: Station,
     sender: Sender<TrackInfo>,
     stop: Arc<AtomicBool>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> MetaResult<()> {
     while !stop.load(Ordering::SeqCst) {
         match run_once(station.clone(), sender.clone(), stop.clone()).await {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(5)).await;
             }
             Err(err) => {
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }
                 eprintln!("Gateway connection error: {err}, retrying in 5s…");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(5)).await;
             }
         }
     }
@@ -119,7 +129,7 @@ async fn run_once(
     station: Station,
     sender: Sender<TrackInfo>,
     stop: Arc<AtomicBool>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> MetaResult<()> {
     if stop.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -138,8 +148,7 @@ async fn run_once(
         if msg.is_text() {
             let txt = msg.into_text()?;
             if let Ok(json) = serde_json::from_str::<Value>(&txt) {
-                let op = json["op"].as_i64().unwrap_or(-1);
-                if op == 0 {
+                if json["op"].as_i64().unwrap_or(-1) == 0 {
                     heartbeat_ms = json["d"]["heartbeat"].as_u64();
                 }
             }
@@ -156,7 +165,7 @@ async fn run_once(
                     break;
                 }
 
-                tokio::time::sleep(interval).await;
+                sleep(interval).await;
 
                 if stop_for_hb.load(Ordering::SeqCst) {
                     break;
@@ -200,6 +209,7 @@ async fn run_once(
 
         if op == 1 && t == "TRACK_UPDATE" {
             if let Some(info) = parse_track_info(&json) {
+                // ignore send errors (e.g., receiver dropped)
                 let _ = sender.send(info);
             }
         }
@@ -214,20 +224,20 @@ fn parse_track_info(json: &Value) -> Option<TrackInfo> {
 
     let title = song
         .get("title")
-        .and_then(|t| t.as_str())
+        .and_then(Value::as_str)
         .unwrap_or("unknown title")
-        .to_string();
+        .to_owned();
 
     let artists: Vec<String> = song
         .get("artists")
-        .and_then(|a| a.as_array())
+        .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
-                .filter_map(|a| a.get("name").and_then(|n| n.as_str()))
-                .map(|s| s.to_owned())
+                .filter_map(|a| a.get("name").and_then(Value::as_str))
+                .map(str::to_owned)
                 .collect::<Vec<String>>()
         })
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     let artist = if artists.is_empty() {
         "Unknown artist".to_string()
@@ -237,18 +247,18 @@ fn parse_track_info(json: &Value) -> Option<TrackInfo> {
 
     let album_cover = song
         .get("albums")
-        .and_then(|a| a.as_array())
+        .and_then(Value::as_array)
         .and_then(|arr| arr.first())
         .and_then(|album| album.get("image"))
-        .and_then(|img| img.as_str())
+        .and_then(Value::as_str)
         .map(|name| format!("{ALBUM_COVER_BASE}{name}"));
 
     let artist_image = song
         .get("artists")
-        .and_then(|a| a.as_array())
+        .and_then(Value::as_array)
         .and_then(|arr| arr.first())
         .and_then(|artist| artist.get("image"))
-        .and_then(|img| img.as_str())
+        .and_then(Value::as_str)
         .map(|name| format!("{ARTIST_IMAGE_BASE}{name}"));
 
     Some(TrackInfo {

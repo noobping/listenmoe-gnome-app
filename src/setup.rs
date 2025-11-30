@@ -14,12 +14,12 @@ pub fn can_install_locally() -> bool {
         return false;
     };
     let apps = data.join("applications");
-    bin.exists()
-        && bin.is_dir()
-        && is_writable(&bin)
-        && apps.exists()
-        && apps.is_dir()
-        && is_writable(&apps)
+
+    let bin_parent_is_writable = bin.parent().map(is_writable).unwrap_or(false);
+    let apps_parent_is_writable = apps.parent().map(is_writable).unwrap_or(false);
+    // If they exist, they must be writable; if not, the parent must be writable.
+    (bin.exists() && bin.is_dir() && is_writable(&bin) || bin_parent_is_writable)
+        && (apps.exists() && apps.is_dir() && is_writable(&apps) || apps_parent_is_writable)
 }
 
 pub fn is_installed_locally() -> bool {
@@ -48,8 +48,12 @@ pub fn install_locally() -> std::io::Result<()> {
     let Some(data) = dirs::data_dir() else {
         return Err(Error::new(ErrorKind::NotFound, "No data directory found"));
     };
-    let apps  = data.join("applications");
-    let icons = data.join("icons").join("hicolor").join("scalable").join("apps");
+    let apps = data.join("applications");
+    let icons = data
+        .join("icons")
+        .join("hicolor")
+        .join("scalable")
+        .join("apps");
     let dest = bin.join(project);
 
     std::fs::create_dir_all(&bin)?;
@@ -78,7 +82,11 @@ pub fn uninstall_locally() -> std::io::Result<()> {
         return Err(Error::new(ErrorKind::NotFound, "No data directory found"));
     };
     let bin = bin.join(env!("CARGO_PKG_NAME"));
-    let icon = data.join("icons").join("hicolor").join("scalable").join("apps");
+    let icon = data
+        .join("icons")
+        .join("hicolor")
+        .join("scalable")
+        .join("apps");
     let desktop = data
         .join("applications")
         .join(format!("{}.desktop", APP_ID));

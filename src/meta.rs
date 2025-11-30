@@ -1,4 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
+use serde::Deserialize;
 use serde_json::Value;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -40,7 +41,6 @@ pub struct Meta {
 }
 
 impl Meta {
-    /// Create a new Meta, using the given channel to send track updates.
     pub fn new(station: Station, sender: Sender<TrackInfo>) -> Rc<Self> {
         Rc::new(Self {
             station: Cell::new(station),
@@ -87,17 +87,61 @@ impl Meta {
     }
 
     pub fn stop(&self) {
-        // mark as not running
         self.running.set(false);
 
-        // Signal the background meta loop to stop
         if let Some(stop) = self.stop_flag.borrow_mut().take() {
             stop.store(true, Ordering::SeqCst);
         }
     }
 }
 
-/// Outer loop: reconnect if needed.
+/// Protocol-level types for the LISTEN.moe gateway
+
+#[derive(Debug, Deserialize)]
+struct GatewayHello {
+    heartbeat: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct GatewaySongPayload {
+    song: Song,
+}
+
+#[derive(Debug, Deserialize)]
+struct Song {
+    title: Option<String>,
+    #[serde(default)]
+    artists: Vec<Artist>,
+    #[serde(default)]
+    albums: Vec<Album>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Artist {
+    name: Option<String>,
+    image: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Album {
+    image: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GatewayEnvelope {
+    op: u8,
+    #[serde(default)]
+    t: Option<String>,
+    #[serde(default)]
+    d: Value,
+}
+
+const OP_HELLO: u8 = 0;
+const OP_DISPATCH: u8 = 1;
+const OP_HEARTBEAT_ACK: u8 = 10;
+const EVENT_TRACK_UPDATE: &str = "TRACK_UPDATE";
+
+/// Outer loop: handles reconnects.
 async fn run_meta_loop(
     station: Station,
     sender: Sender<TrackInfo>,
@@ -140,24 +184,18 @@ async fn run_once(
 
     let (mut write, mut read) = ws_stream.split();
 
-    // 1. Read hello (op 0) and prepare heartbeat
-    let mut heartbeat_ms: Option<u64> = None;
+    // === 1. Read hello (op=0) and get heartbeat interval ===
+    let heartbeat_ms = read_hello_heartbeat(&mut read).await?;
 
-    if let Some(msg) = read.next().await {
-        let msg = msg?;
-        if msg.is_text() {
-            let txt = msg.into_text()?;
-            if let Ok(json) = serde_json::from_str::<Value>(&txt) {
-                if json["op"].as_i64().unwrap_or(-1) == 0 {
-                    heartbeat_ms = json["d"]["heartbeat"].as_u64();
-                }
-            }
-        }
-    }
-
-    // Spawn heartbeat sender if there is an interval
+    // === 2. Spawn heartbeat task (if we got an interval) ===
     if let Some(ms) = heartbeat_ms {
         let stop_for_hb = stop.clone();
+        let mut write = write.reunite(read.into_inner()).expect("failed to reunite");
+        // Re-split after spawning heartbeat:
+        let (mut w, r) = write.split();
+        write = w;
+        read = r;
+
         tokio::spawn(async move {
             let interval = Duration::from_millis(ms);
             loop {
@@ -179,7 +217,7 @@ async fn run_once(
         });
     }
 
-    // 2. Process messages, look for TRACK_UPDATE
+    // === 3. Process all subsequent messages ===
     while !stop.load(Ordering::SeqCst) {
         let Some(msg) = read.next().await else {
             break;
@@ -191,26 +229,26 @@ async fn run_once(
         }
 
         let txt = msg.into_text()?;
-        let json: Value = match serde_json::from_str(&txt) {
-            Ok(v) => v,
+        let env: GatewayEnvelope = match serde_json::from_str(&txt) {
+            Ok(env) => env,
             Err(err) => {
                 eprintln!("Gateway JSON parse error: {err}");
                 continue;
             }
         };
 
-        let op = json["op"].as_i64().unwrap_or(-1);
-        let t = json["t"].as_str().unwrap_or("");
-
-        if op == 10 {
-            println!("Gateway heartbeat ACK");
-            continue;
-        }
-
-        if op == 1 && t == "TRACK_UPDATE" {
-            if let Some(info) = parse_track_info(&json) {
-                // ignore send errors (e.g., receiver dropped)
-                let _ = sender.send(info);
+        match (env.op, env.t.as_deref()) {
+            (OP_HEARTBEAT_ACK, _) => {
+                // Could be used for metrics / debugging
+                println!("Gateway heartbeat ACK");
+            }
+            (OP_DISPATCH, Some(EVENT_TRACK_UPDATE)) => {
+                if let Some(info) = parse_track_info(&env.d) {
+                    let _ = sender.send(info);
+                }
+            }
+            _ => {
+                // Ignore everything else for now
             }
         }
     }
@@ -218,47 +256,57 @@ async fn run_once(
     Ok(())
 }
 
-/// Extract artist(s) + title from JSON.
-fn parse_track_info(json: &Value) -> Option<TrackInfo> {
-    let song = json.get("d")?.get("song")?;
+/// Read the initial hello and extract the heartbeat interval (if any).
+async fn read_hello_heartbeat<S>(read: &mut S) -> MetaResult<Option<u64>>
+where
+    S: StreamExt<Item = tokio_tungstenite::tungstenite::Result<Message>> + Unpin,
+{
+    if let Some(msg) = read.next().await {
+        let msg = msg?;
+        if msg.is_text() {
+            let txt = msg.into_text()?;
+            let env: GatewayEnvelope = serde_json::from_str(&txt)?;
 
-    let title = song
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown title")
-        .to_owned();
+            if env.op == OP_HELLO {
+                let hello: GatewayHello = serde_json::from_value(env.d)?;
+                return Ok(Some(hello.heartbeat));
+            }
+        }
+    }
 
-    let artists: Vec<String> = song
-        .get("artists")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|a| a.get("name").and_then(Value::as_str))
-                .map(str::to_owned)
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
+    Ok(None)
+}
+
+/// Extract artist(s) + title from the typed JSON `d` value.
+fn parse_track_info(d: &Value) -> Option<TrackInfo> {
+    let payload: GatewaySongPayload = serde_json::from_value(d.clone()).ok()?;
+    let Song {
+        title,
+        artists,
+        albums,
+    } = payload.song;
+
+    let title = title.unwrap_or_else(|| "unknown title".to_owned());
 
     let artist = if artists.is_empty() {
-        "Unknown artist".to_string()
+        "Unknown artist".to_owned()
     } else {
-        artists.join(", ")
+        artists
+            .iter()
+            .filter_map(|a| a.name.as_deref())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+            .join(", ")
     };
 
-    let album_cover = song
-        .get("albums")
-        .and_then(Value::as_array)
-        .and_then(|arr| arr.first())
-        .and_then(|album| album.get("image"))
-        .and_then(Value::as_str)
+    let album_cover = albums
+        .first()
+        .and_then(|album| album.image.as_deref())
         .map(|name| format!("{ALBUM_COVER_BASE}{name}"));
 
-    let artist_image = song
-        .get("artists")
-        .and_then(Value::as_array)
-        .and_then(|arr| arr.first())
-        .and_then(|artist| artist.get("image"))
-        .and_then(Value::as_str)
+    let artist_image = artists
+        .first()
+        .and_then(|a| a.image.as_deref())
         .map(|name| format!("{ARTIST_IMAGE_BASE}{name}"));
 
     Some(TrackInfo {

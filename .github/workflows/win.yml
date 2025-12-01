@@ -79,7 +79,7 @@ jobs:
           repository: ${{ github.repository }}
 
       - name: Upload asset to release
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@v1.20.0
         with:
           tag: ${{ steps.get_latest_release.outputs.release }}
           allowUpdates: true

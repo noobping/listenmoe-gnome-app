@@ -244,7 +244,6 @@ pub fn build_ui(app: &Application) {
     window.set_titlebar(Some(&header));
     window.set_child(Some(&dummy));
 
-    // Stations
     for station in [Station::Jpop, Station::Kpop] {
         let action = create_station_action(station, &play_button, &window, &radio, &meta);
         window.add_action(&action);
@@ -258,7 +257,6 @@ pub fn build_ui(app: &Application) {
     menu.append(Some(if is_installed_locally() { "Uninstall" } else { "Install" } ), Some("win.setup"));
     menu.append(Some("Quit"), Some("win.quit"));
 
-    // shortcuts
     #[cfg(feature = "setup")]
     app.set_accels_for_action("win.setup", &["F2"]);
     app.set_accels_for_action("win.about", &["F1"]);
@@ -270,8 +268,7 @@ pub fn build_ui(app: &Application) {
     app.set_accels_for_action("win.kpop", &["<primary>k", "XF86AudioNext", "<primary><shift>z", "<primary>y"]);
     app.set_accels_for_action("win.toggle", &["<primary>p", "space", "Return", "<primary>s"]);
 
-    // Poll the channels on the GTK main thread and update the UI. Using `try_iter()`
-    // provides a clean iterator over any pending messages and reduces boilerplate.
+    // Poll the channels on the GTK main thread and update the UI.
     {
         let win = win_title.clone();
         let art_popover = art_popover.clone();
@@ -280,11 +277,9 @@ pub fn build_ui(app: &Application) {
         let cover_tx = cover_tx.clone();
         let window = window.clone();
         glib::timeout_add_local(Duration::from_millis(100), move || {
-            // Drain all available TrackInfo messages.
             for info in rx.try_iter() {
                 win.set_title(&info.artist);
                 win.set_subtitle(&info.title);
-
                 // Determine which image to load, if any.
                 let image_url = info.album_cover.clone().or(info.artist_image.clone());
                 if let Some(url) = image_url {
@@ -298,7 +293,6 @@ pub fn build_ui(app: &Application) {
                 }
             }
 
-            // Drain any available cover updates.
             for result in cover_rx.try_iter() {
                 match result {
                     Ok(bytes_vec) => {
@@ -338,15 +332,14 @@ pub fn build_ui(app: &Application) {
     window.present();
 }
 
-/// Download an image synchronously.  This helper runs in a worker thread and
-/// therefore does not block the GTK main loop.  It returns the raw bytes
+/// Download an image synchronously. This helper runs in a worker thread and
+/// therefore does not block the GTK main loop. It returns the raw bytes
 /// representing the image or an error if the request fails.
 pub fn fetch_cover_bytes_blocking(url: &str) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
     let resp = reqwest::blocking::get(url)?;
     if !resp.status().is_success() {
         return Err(format!("Non-success status: {}", resp.status()).into());
     }
-
     let body = resp.bytes()?;
     Ok(body.to_vec())
 }

@@ -13,7 +13,6 @@ jobs:
     env:
       MSYS2_PATH: C:\tools\msys64
       PKG_CONFIG_PATH: C:\tools\msys64\mingw64\lib\pkgconfig
-      PATH: C:\tools\msys64\mingw64\bin;C:\tools\msys64\usr\bin
 
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +30,11 @@ jobs:
           C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm mingw-w64-x86_64-libadwaita"
           C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkgconf"
           C:\tools\msys64\usr\bin\bash -lc "pacman -S --noconfirm mingw-w64-x86_64-make"
+
+      - name: Add MSYS2 paths
+        run: |
+          echo "C:\tools\msys64\mingw64\bin" >> $env:GITHUB_PATH
+          echo "C:\tools\msys64\usr\bin" >> $env:GITHUB_PATH
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

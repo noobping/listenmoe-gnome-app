@@ -48,15 +48,15 @@ fn main() {
         xml.push_str(&format!("\t\t<file>{}</file>\n", f));
     }
     xml.push_str("\t</gresource>\n</gresources>\n");
-    fs::write(data_dir.join("resources.xml"), xml).unwrap();
+    fs::write(data_dir.join(format!("{app_id}.resources.xml")), xml).unwrap();
 
     // Compile GResources into $OUT_DIR/compiled.gresource
-    glib_build_tools::compile_resources(&["data"], "data/resources.xml", "compiled.gresource");
+    glib_build_tools::compile_resources(&["data"], &format!("data/{app_id}.resources.xml"), "compiled.gresource");
 
     // Generate .desktop file for non-setup builds
     #[cfg(not(feature = "setup"))]
     {
-        desktop_file(&project, &version, &summary, &app_id);
+        desktop_file(&data_dir, &project, &version, &summary, &app_id);
         metainfo_file(&data_dir, &app_id, &authors.first().expect("unknown author"), &repository, &project, &summary, &homepage, &license, &version, &issue_tracker);
     }
 }
@@ -78,8 +78,7 @@ fn collect_svg_icons(dir: &Path, data_dir: &Path, icons: &mut Vec<String>) {
 }
 
 #[cfg(not(feature = "setup"))]
-fn desktop_file(project: &str, version: &str, comment: &str, app_id: &str) {
-    let dir = Path::new(".");
+fn desktop_file(data_dir: &Path, project: &str, version: &str, comment: &str, app_id: &str) {
     let contents = format!(
         "[Desktop Entry]
 Type=Application
@@ -92,7 +91,7 @@ Terminal=false
 Categories=AudioVideo;Player;
 "
     );
-    fs::write(dir.join(format!("{project}.desktop")), contents)
+    fs::write(data_dir.join(format!("{app_id}.desktop")), contents)
         .expect("Can not build desktop file");
 }
 

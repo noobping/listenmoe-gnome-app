@@ -46,8 +46,29 @@ jobs:
       - name: Build
         run: cargo build --release --target x86_64-pc-windows-gnu
 
+      - name: Create dist folder
+        run: |
+          mkdir dist
+          copy target\x86_64-pc-windows-gnu\release\listenmoe.exe dist\
+
+      - name: Copy GTK/libadwaita runtime DLLs
+        run: |
+          C:\tools\msys64\usr\bin\bash -lc ^
+            "cp /mingw64/bin/libadwaita-1-0.dll \
+                /mingw64/bin/libgtk-4-1.dll \
+                /mingw64/bin/libgdk_pixbuf-2.0-0.dll \
+                /mingw64/bin/libpango-1.0-0.dll \
+                /mingw64/bin/libcairo-2.dll \
+                /mingw64/bin/libgio-2.0-0.dll \
+                /mingw64/bin/libglib-2.0-0.dll \
+                /mingw64/bin/libgobject-2.0-0.dll \
+                /c/dist/"
+
+      - name: Zip dist
+        run: powershell Compress-Archive dist listenmoe-windows.zip
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: listenmoe-windows
-          path: target/x86_64-pc-windows-gnu/release/listenmoe.exe
+          path: listenmoe-windows.zip

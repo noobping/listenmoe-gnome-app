@@ -1,3 +1,5 @@
+![License](https://img.shields.io/badge/license-GPLv3+-darkgreen.svg)
+[![Windows Build](https://github.com/noobping/listenmoe-gnome-app/actions/workflows/win.yml/badge.svg)](https://github.com/noobping/listenmoe-gnome-app/actions/workflows/win.yml)
 
 # A tiny Gnome App for LISTEN.moe
 

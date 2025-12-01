@@ -27,7 +27,7 @@ jobs:
       - name: Install build deps
         run: |
           dnf -y update
-          dnf -y install build-essential \
+          dnf -y install \
             alsa-lib-devel \
             cairo-devel \
             clang \

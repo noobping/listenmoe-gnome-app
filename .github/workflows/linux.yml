@@ -27,21 +27,9 @@ jobs:
       - name: Install build deps
         run: |
           dnf -y update
-          dnf -y install \
-            alsa-lib-devel \
-            cairo-devel \
-            clang \
-            gcc \
-            git \
-            glib2-devel \
-            gtk4-devel \
-            libadwaita-devel \
-            make \
-            nettle-devel \
-            openssl-devel \
-            pango-devel \
-            pkg-config \
-            pkgconf-pkg-config
+          dnf -y install mold alsa-lib-devel libgpg-error-devel clang pkg-config nettle-devel \
+            cairo-devel gcc git glib2-devel gtk4-devel libadwaita-devel make nettle-devel \
+            openssl-devel pango-devel pkg-config pkgconf-pkg-config
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
       - name: Checkout

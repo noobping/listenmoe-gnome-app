@@ -7,7 +7,7 @@ on:
       - "v*"
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
     permissions:
       contents: write
@@ -55,16 +55,14 @@ jobs:
 
       - name: Copy GTK/libadwaita runtime DLLs
         run: |
-          C:\tools\msys64\usr\bin\bash -lc ^
-            "cp /mingw64/bin/libadwaita-1-0.dll \
-                /mingw64/bin/libgtk-4-1.dll \
-                /mingw64/bin/libgdk_pixbuf-2.0-0.dll \
-                /mingw64/bin/libpango-1.0-0.dll \
-                /mingw64/bin/libcairo-2.dll \
-                /mingw64/bin/libgio-2.0-0.dll \
-                /mingw64/bin/libglib-2.0-0.dll \
-                /mingw64/bin/libgobject-2.0-0.dll \
-                /c/dist/"
+          copy C:\tools\msys64\mingw64\bin\libadwaita-1-0.dll dist\
+          copy C:\tools\msys64\mingw64\bin\libgtk-4-1.dll dist\
+          copy C:\tools\msys64\mingw64\bin\libgdk_pixbuf-2.0-0.dll dist\
+          copy C:\tools\msys64\mingw64\bin\libpango-1.0-0.dll dist\
+          copy C:\tools\msys64\mingw64\bin\libcairo-2.dll dist\
+          copy C:\tools\msys64\mingw64\bin\libgio-2.0-0.dll dist\
+          copy C:\tools\msys64\mingw64\bin\libglib-2.0-0.dll dist\
+          copy C:\tools\msys64\mingw64\bin\libgobject-2.0-0.dll dist\
 
       - name: Zip dist
         run: powershell Compress-Archive dist listenmoe-windows.zip

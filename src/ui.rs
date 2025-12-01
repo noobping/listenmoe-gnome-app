@@ -20,6 +20,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+const COVER_MAX_SIZE: i32 = 250;
+
 fn make_action<F>(name: &str, f: F) -> SimpleAction
 where
     F: Fn() + 'static,
@@ -280,10 +282,10 @@ pub fn build_ui(app: &Application) {
             for info in rx.try_iter() {
                 win.set_title(&info.artist);
                 win.set_subtitle(&info.title);
-                // Determine which image to load, if any.
-                let image_url = info.album_cover.clone().or(info.artist_image.clone());
-                if let Some(url) = image_url {
+
+                if let Some(url) = info.album_cover.as_ref().or(info.artist_image.as_ref()) {
                     let tx = cover_tx.clone();
+                    let url = url.to_string();
                     thread::spawn(move || {
                         let result = fetch_cover_bytes_blocking(&url).map_err(|e| e.to_string());
                         let _ = tx.send(result);
@@ -298,13 +300,7 @@ pub fn build_ui(app: &Application) {
                     Ok(bytes_vec) => {
                         let bytes = glib::Bytes::from_owned(bytes_vec);
                         let stream = MemoryInputStream::from_bytes(&bytes);
-                        match Pixbuf::from_stream_at_scale(
-                            &stream,
-                            250,  // max width
-                            250,  // max height
-                            true, // preserve aspect
-                            None::<&Cancellable>,
-                        ) {
+                        match Pixbuf::from_stream_at_scale(&stream, COVER_MAX_SIZE, COVER_MAX_SIZE, true, None::<&Cancellable>) {
                             Ok(pixbuf) => {
                                 let texture = Texture::for_pixbuf(&pixbuf);
                                 art_picture.set_paintable(Some(&texture));

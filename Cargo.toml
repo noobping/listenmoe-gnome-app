@@ -19,7 +19,7 @@ setup = ["dirs"]
 rodio = { version = "^0.21.1", default-features = false, features = ["playback"] }
 symphonia = { version = "^0.5.5", features = ["ogg", "vorbis"] }
 reqwest = { version = "^0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots"] }
-adw = { version = "^0.8.0", package = "libadwaita", features = ["v1_8"] }
+adw = { version = "^0.8.0", package = "libadwaita", features = ["v1_5"] }
 serde_json = "^1.0.145"
 dirs = { version = "^6.0.0", optional = true}
 serde = "^1.0.228"

@@ -1,8 +1,5 @@
 name: Linux
 
-permissions:
-  contents: write
-
 on:
   workflow_dispatch:
   push:
@@ -24,6 +21,9 @@ jobs:
     container:
       image: fedora:43
 
+    permissions:
+      contents: write
+
     env:
       PKG_CONFIG_ALLOW_CROSS: 1
       CARGO_TERM_COLOR: always
@@ -35,21 +35,6 @@ jobs:
         with:
           fetch-tags: true
           fetch-depth: 0
-
-      - name: Resolve tag to use
-        run: |
-          dnf install -y git
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-          echo "--- tags ---"
-          git tag --list
-
-          echo "--- describe ---"
-          TAG=$(git describe --tags --abbrev=0)
-          echo "Using tag from git describe: $TAG"
-
-          # export for later steps
-          echo "LATEST_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Install build deps
         run: |
@@ -65,6 +50,17 @@ jobs:
           "$HOME/.cargo/bin/rustup" target add x86_64-unknown-linux-gnu
           "$HOME/.cargo/bin/rustup" target add aarch64-unknown-linux-gnu
 
+      - name: Tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "TAG_NAME=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            latest_tag=$(git describe --tags --abbrev=0)
+            echo "TAG_NAME=$latest_tag" >> "$GITHUB_ENV"
+          fi
+
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }} --features setup
 
@@ -77,12 +73,10 @@ jobs:
           name: ${{ env.BIN_NAME }}-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ env.BIN_NAME }}
 
-      - name: Show tag we will release
-        run: echo "Releasing tag: ${{ env.LATEST_TAG }}"
-
       - name: Release
+        if: ${{ env.TAG_NAME != '' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.LATEST_TAG }}
+          tag_name: ${{ env.TAG_NAME }}
           files: target/${{ matrix.target }}/release/${{ env.BIN_NAME }}
           overwrite_files: true

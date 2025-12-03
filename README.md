@@ -31,3 +31,15 @@ chmod +x ./listenmoe.linux.x86_64
 2. Run the executable.
 
 While the app is running, press `F2` to install or uninstall it locally. The app will place (or remove) its files in the user data directory: `~/.local`.
+
+## AppImage
+
+This application is an internet radio client. It streams music from the internet, so it needs network access.
+If you run this app inside **firejail**, make sure the firejail profile allows network access. Otherwise it won’t be able to stream any audio.
+To install the provided firejail profile:
+
+```sh
+mkdir -p ~/.config/firejail
+cp /path/to/extracted/usr/share/firejail/listenmoe.profile ~/.config/firejail/
+firejail listenmoe
+```

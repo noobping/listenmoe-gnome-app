@@ -259,7 +259,6 @@ pub fn build_ui(app: &Application) {
     #[cfg(all(target_os = "linux", feature = "setup"))]
     window.add_action(&{
         let menu_clone = menu.clone();
-        let index = setup_index.clone();
         make_action("setup", move || {
             if !can_install_locally() {
                 return;

@@ -77,7 +77,7 @@ pub fn build_ui(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("Listen.moe Radio")
-        .icon_name("listenmoe")
+        .icon_name(APP_ID)
         .default_width(300)
         .default_height(40)
         .resizable(false)

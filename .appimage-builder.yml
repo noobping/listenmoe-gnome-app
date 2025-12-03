@@ -1,7 +1,7 @@
 version: 1
 
 script:
-  - mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/{192x192,scalable}/apps AppDir/usr/share/firejail/listenmoe.profile
+  - mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/{192x192,scalable}/apps AppDir/usr/share/firejail
   - cp data/listenmoe.png AppDir/usr/share/icons/hicolor/192x192/apps/listenmoe.png
   - cp -r data/scalable/apps/* AppDir/usr/share/icons/hicolor/scalable/apps/
   - cp target/release/listenmoe AppDir/usr/bin/

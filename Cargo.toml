@@ -5,7 +5,7 @@ repository = "https://github.com/noobping/listenmoe-gnome-app"
 license = "MIT"
 homepage = "https://listen.moe/"
 authors = ["Nick <hello@noobping.dev>"]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 [package.metadata]

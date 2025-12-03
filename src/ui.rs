@@ -2,7 +2,7 @@ use crate::listen::Listen;
 use crate::meta::{Meta, TrackInfo};
 use crate::station::Station;
 
-#[cfg(feature = "setup")]
+#[cfg(all(target_os = "linux", feature = "setup"))]
 use crate::setup::{can_install_locally, install_locally, is_installed_locally, uninstall_locally};
 
 use adw::glib;
@@ -176,7 +176,7 @@ pub fn build_ui(app: &Application) {
         })
     });
 
-    #[cfg(feature = "setup")]
+    #[cfg(all(target_os = "linux", feature = "setup"))]
     window.add_action(&make_action("setup", move || {
         if !can_install_locally() {
             return;
@@ -259,11 +259,11 @@ pub fn build_ui(app: &Application) {
         );
     }
     menu.append(Some("About"), Some("win.about"));
-    #[cfg(feature = "setup")]
+    #[cfg(all(target_os = "linux", feature = "setup"))]
     menu.append(Some(if is_installed_locally() { "Uninstall" } else { "Install" } ), Some("win.setup"));
     menu.append(Some("Quit"), Some("win.quit"));
 
-    #[cfg(feature = "setup")]
+    #[cfg(all(target_os = "linux", feature = "setup"))]
     app.set_accels_for_action("win.setup", &["F2"]);
     app.set_accels_for_action("win.about", &["F1"]);
     app.set_accels_for_action("win.copy", &["<primary>c"]);

@@ -53,7 +53,15 @@ fn main() {
     // Compile GResources into $OUT_DIR/compiled.gresource
     glib_build_tools::compile_resources(&["data"], &format!("data/{app_id}.resources.xml"), "compiled.gresource");
 
-    // Generate .desktop file for non-setup builds
+    #[cfg(target_os = "windows")]
+    #[cfg(feature = "icon")]
+    {
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon(data_dir.join(format!("{app_id}.ico"))); // path to your .ico
+        res.compile().expect("Failed to compile Windows resources");
+    }
+
+    #[cfg(target_os = "linux")]
     #[cfg(not(feature = "setup"))]
     {
         desktop_file(&data_dir, &project, &version, &summary, &app_id);
@@ -77,6 +85,7 @@ fn collect_svg_icons(dir: &Path, data_dir: &Path, icons: &mut Vec<String>) {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[cfg(not(feature = "setup"))]
 fn desktop_file(data_dir: &Path, project: &str, version: &str, comment: &str, app_id: &str) {
     let contents = format!(
@@ -95,6 +104,7 @@ Categories=AudioVideo;Player;
         .expect("Can not build desktop file");
 }
 
+#[cfg(target_os = "linux")]
 #[cfg(not(feature = "setup"))]
 fn metainfo_file(
     data_dir: &Path,

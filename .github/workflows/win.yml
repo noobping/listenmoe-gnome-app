@@ -1,9 +1,6 @@
 name: Windows
 
 on:
-  release:
-    types: 
-    - published
   workflow_dispatch:
   push:
     tags:

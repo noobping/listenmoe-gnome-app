@@ -5,8 +5,6 @@ use crate::station::Station;
 #[cfg(all(target_os = "linux", feature = "setup"))]
 use crate::setup::{can_install_locally, install_locally, is_installed_locally, uninstall_locally};
 
-#[cfg(target_os = "windows")]
-use adw::gtk::gdk::SurfaceExtWindows;
 use adw::glib;
 use adw::gtk::{
     self,

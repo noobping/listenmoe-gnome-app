@@ -14,6 +14,8 @@ use adw::gtk::{
 };
 use adw::prelude::*;
 use adw::{Application, WindowTitle};
+use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
+use std::cell::RefCell;
 use std::error::Error;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -83,12 +85,28 @@ pub fn build_ui(app: &Application) {
         .resizable(false)
         .build();
 
+    let platform_config = PlatformConfig {
+        dbus_name: APP_ID,
+        display_name: "LISTEN.moe",
+        hwnd: None,
+    };
+    let mut controls = MediaControls::new(platform_config).expect("Failed to init media controls");
+    let controls = Rc::new(RefCell::new(controls));
+    let (ctrl_tx, ctrl_rx) = mpsc::channel::<MediaControlEvent>();
+    {
+        let tx = ctrl_tx.clone();
+        controls
+            .borrow_mut()
+            .attach(move |event| { let _ = tx.send(event); })
+            .expect("Failed to attach media control events");
+    }
     window.add_action(&{
         let radio = radio.clone();
         let meta = meta.clone();
         let win = win_title.clone();
         let play = play_button.clone();
         let stop = stop_button.clone();
+        let controls = controls.clone();
         make_action("play", move || {
             win.set_title("LISTEN.moe");
             win.set_subtitle("Connecting...");
@@ -96,6 +114,7 @@ pub fn build_ui(app: &Application) {
             radio.start();
             play.set_visible(false);
             stop.set_visible(true);
+            let _ = controls.borrow_mut().set_playback(MediaPlayback::Playing { progress: None });
         })
     });
     window.add_action(&{
@@ -104,6 +123,7 @@ pub fn build_ui(app: &Application) {
         let win = win_title.clone();
         let play = play_button.clone();
         let stop = stop_button.clone();
+        let controls = controls.clone();
         make_action("stop", move || {
             meta.stop();
             radio.stop();
@@ -111,6 +131,7 @@ pub fn build_ui(app: &Application) {
             play.set_visible(true);
             win.set_title("LISTEN.moe");
             win.set_subtitle("JPOP/KPOP Radio");
+            let _ = controls.borrow_mut().set_playback(MediaPlayback::Paused { progress: None });
         })
     });
     window.add_action(&{
@@ -293,7 +314,19 @@ pub fn build_ui(app: &Application) {
         let cover_rx = cover_rx;
         let cover_tx = cover_tx.clone();
         let window = window.clone();
+        let ctrl_rx = ctrl_rx;
         glib::timeout_add_local(Duration::from_millis(100), move || {
+            for event in ctrl_rx.try_iter() {
+                let _ = match event {
+                    MediaControlEvent::Play => adw::prelude::WidgetExt::activate_action(&window, "win.play", None::<&glib::Variant>),
+                    MediaControlEvent::Pause | MediaControlEvent::Stop => adw::prelude::WidgetExt::activate_action(&win, "win.stop", None::<&glib::Variant>),
+                    MediaControlEvent::Toggle => adw::prelude::WidgetExt::activate_action(&window, "win.toggle", None::<&glib::Variant>),
+                    MediaControlEvent::Next => adw::prelude::WidgetExt::activate_action(&window, "win.kpop", None::<&glib::Variant>),
+                    MediaControlEvent::Previous => adw::prelude::WidgetExt::activate_action(&window, "win.jpop", None::<&glib::Variant>),
+                    _ => Ok(())
+                };
+            }
+
             for info in rx.try_iter() {
                 win.set_title(&info.artist);
                 win.set_subtitle(&info.title);

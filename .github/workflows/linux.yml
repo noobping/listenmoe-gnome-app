@@ -74,7 +74,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Build
-        run: cargo build --release --features setup
+        run: cargo build --release --features setup,controls
 
       - name: Rename
         run: mv target/release/${{ env.BIN_NAME }} ${{ env.BIN_NAME }}-${{ matrix.target }}

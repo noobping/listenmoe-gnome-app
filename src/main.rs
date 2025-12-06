@@ -11,15 +11,19 @@ mod station;
 mod ui;
 
 const APP_ID: &str = env!("APP_ID");
+#[cfg(any(debug_assertions, feature = "setup", feature = "icon"))]
 const RESOURCE_ID: &str = env!("RESOURCE_ID");
 use adw::gtk::{gdk::Display, IconTheme};
 use adw::prelude::*;
 use adw::Application;
+#[cfg(any(debug_assertions, feature = "setup", feature = "icon"))]
+use adw::gtk::{gdk::Display, IconTheme};
 
 fn main() {
     locale::init_i18n();
 
     // Register resources compiled into the binary. If this fails, the app cannot find its assets.
+    #[cfg(any(debug_assertions, feature = "setup", feature = "icon"))]
     adw::gtk::gio::resources_register_include!("compiled.gresource")
         .expect("Failed to register resources");
 
@@ -27,6 +31,7 @@ fn main() {
     adw::init().expect("Failed to initialize libadwaita");
 
     // Load the icon theme from the embedded resources so that icons resolve correctly even outside a installed environment.
+    #[cfg(any(debug_assertions, feature = "setup", feature = "icon"))]
     if let Some(display) = Display::default() {
         let theme = IconTheme::for_display(&display);
         theme.add_resource_path(RESOURCE_ID);

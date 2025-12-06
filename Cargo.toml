@@ -14,7 +14,8 @@ discord = "https://listen.moe/discord"
 
 [features]
 setup = []
-icon = ["winresource", "gdk4-win32"]
+icon = ["winresource"]
+controls = ["souvlaki"]
 
 [dependencies]
 rodio = { version = "^0.21.1", default-features = false, features = ["playback"] }
@@ -24,11 +25,10 @@ adw = { version = "^0.8.0", package = "libadwaita", features = ["v1_5"] }
 serde_json = "^1.0.145"
 serde = "^1.0.228"
 tungstenite = { version = "^0.28.0", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
-gettext-rs = "0.7.7"
-locale_config = "0.3.0"
-souvlaki = { version = "^0.8.3", default-features = false, features = ["use_zbus"] }
-gdk4-win32 = { version = "^0.10.3", optional = true}
-dirs-next = "2.0.0"
+gettext-rs = "^0.7.7"
+locale_config = "^0.3.0"
+souvlaki = { version = "^0.8.3", optional = true, default-features = false, features = ["use_zbus"] }
+dirs-next = "^2.0.0"
 
 [build-dependencies]
 glib-build-tools = "^0.21.0"
